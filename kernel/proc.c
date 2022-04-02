@@ -127,6 +127,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p -> tracingsyscall = 0;
+
   return p;
 }
 
@@ -290,6 +292,8 @@ fork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+
+  np->tracingsyscall = p->tracingsyscall;
 
   pid = np->pid;
 
@@ -692,4 +696,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// return the number of allocated processes.
+uint64 proccnt(void) {
+  uint64 cnt = 0;
+  for(struct proc *p = proc; p < &proc[NPROC]; p++) {
+    if(p -> state != UNUSED) {
+      cnt++;
+    }
+  }
+  return cnt;
 }

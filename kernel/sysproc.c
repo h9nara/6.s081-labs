@@ -6,6 +6,30 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
+
+uint64 sys_sysinfo(void)
+{
+  uint64 addr;
+  if(argaddr(0, &addr) < 0)
+    return -1;
+  
+  struct sysinfo sinfo;
+  sinfo.freemem = count_free_mem(); // kalloc.c
+  sinfo.nproc = proccnt(); // proc.c
+  
+  if(copyout(myproc()->pagetable, addr, (char *)&sinfo, sizeof(sinfo)) < 0)
+    return -1;
+  return 0;
+}
+
+uint64 sys_trace(void) {
+  int n;
+  if (argint(0, &n) < 0)
+    return -1;
+  myproc() -> tracingsyscall = n;
+  return 0;
+}
 
 uint64
 sys_exit(void)
