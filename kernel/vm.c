@@ -21,9 +21,12 @@ extern char trampoline[]; // trampoline.S
 void
 kvminit()
 {
+  // Allocate page for the top-level page directory.
   kernel_pagetable = (pagetable_t) kalloc();
+  // Zero out old page table entries.
   memset(kernel_pagetable, 0, PGSIZE);
 
+  // Mapping I/O devices one by one.
   // uart registers
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
 
@@ -52,6 +55,7 @@ kvminit()
 void
 kvminithart()
 {
+  // Write the satp register.
   w_satp(MAKE_SATP(kernel_pagetable));
   sfence_vma();
 }
@@ -440,3 +444,46 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+void vmprinthelper(pagetable_t, int);
+
+// Page table lab
+// Print the page table.
+void vmprint(pagetable_t pt) {
+  printf("page table %p\n", pt);
+  vmprinthelper(pt, 0);
+}
+
+void vmprinthelper(pagetable_t pt, int level) {
+  if (level == 3) {
+    return;
+  }
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pt[i];
+    // valid page table entry.
+    if (pte & PTE_V) {
+      char *ident;
+      switch (level)
+      {
+      case 0:
+        ident = "..";
+        break;
+      case 1:
+        ident = ".. ..";
+        break;
+      default:
+        ident = ".. .. ..";
+        break;
+      }
+      printf("%s%d: pte %p pa %p\n", ident, i, pte, PTE2PA(pte));
+      
+      // This pte points to a lower level page table.
+      if ((pte & (PTE_R | PTE_W | PTE_X)) == 0) {
+        uint64 child = PTE2PA(pte);
+        vmprinthelper((pagetable_t)child, level + 1);
+      }
+    }
+  }
+}
+
+
