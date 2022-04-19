@@ -31,15 +31,17 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
 
+      // Allocate kernel stack in allocproc instead.
+
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
   kvminithart();
 }
@@ -121,6 +123,21 @@ found:
     return 0;
   }
 
+  // Create kernel page table for process.
+  p -> kernel_pagetable = user_kvminit();
+  if (p -> kernel_pagetable == 0) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  // Set up kernel stack.
+  char *pa = kalloc();
+  if (pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK(0);
+  ukvmmap(p -> kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p -> kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -149,6 +166,15 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+
+  // Free the process's kernel stack.
+  void *kstack_pa = (void *)ukvmpa(p -> kernel_pagetable, p -> kstack);
+  kfree(kstack_pa);
+  p -> kstack = 0;
+
+  // Free the process's kernel page table.
+  free_pagetable(p -> kernel_pagetable);
+  p -> kernel_pagetable = 0;
   p->state = UNUSED;
 }
 
@@ -471,6 +497,11 @@ scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+
+        // Write the satp register.
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
+
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
@@ -480,6 +511,11 @@ scheduler(void)
         c->proc = 0;
 
         found = 1;
+      }
+      if (found == 1) {
+        // Write the satp register.
+        w_satp(MAKE_SATP(kernel_pagetable));
+        sfence_vma();
       }
       release(&p->lock);
     }

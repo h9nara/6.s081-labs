@@ -13,6 +13,8 @@ struct mbuf;
 struct sock;
 #endif
 
+extern pagetable_t kernel_pagetable;
+
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -159,9 +161,13 @@ int             uartgetc(void);
 
 // vm.c
 void            kvminit(void);
+pagetable_t     user_kvminit(void);
 void            kvminithart(void);
 uint64          kvmpa(uint64);
+uint64          ukvmpa(pagetable_t, uint64);
 void            kvmmap(uint64, uint64, uint64, int);
+void            ukvmmap(pagetable_t, uint64, uint64, uint64, int);
+void            free_pagetable(pagetable_t);
 int             mappages(pagetable_t, uint64, uint64, uint64, int);
 pagetable_t     uvmcreate(void);
 void            uvminit(pagetable_t, uchar *, uint);

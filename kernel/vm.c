@@ -50,6 +50,41 @@ kvminit()
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
 }
 
+// Create a kernel page table for a user process.
+pagetable_t user_kvminit() {
+  pagetable_t user_kpgtbl;
+  user_kpgtbl = (pagetable_t)kalloc();
+  if (user_kpgtbl == 0) {
+    return 0;
+  }
+  memset(user_kpgtbl, 0, PGSIZE);
+
+  // Mapping I/O devices one by one.
+  // uart registers
+  ukvmmap(user_kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  ukvmmap(user_kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  ukvmmap(user_kpgtbl, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  ukvmmap(user_kpgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  ukvmmap(user_kpgtbl, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  ukvmmap(user_kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  ukvmmap(user_kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  return user_kpgtbl;
+}
+
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
 void
@@ -125,6 +160,13 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
     panic("kvmmap");
 }
 
+// Add a mapping for a user process's kernel page table.
+void
+ukvmmap(pagetable_t pgtbl, uint64 va, uint64 pa, uint64 sz, int perm) {
+  if(mappages(pgtbl, va, sz, pa, perm) != 0)
+    panic("ukvmmap"); 
+}
+
 // translate a kernel virtual address to
 // a physical address. only needed for
 // addresses on the stack.
@@ -141,6 +183,22 @@ kvmpa(uint64 va)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
     panic("kvmpa");
+  pa = PTE2PA(*pte);
+  return pa+off;
+}
+
+uint64
+ukvmpa(pagetable_t pagetable, uint64 va)
+{
+  uint64 off = va % PGSIZE;
+  pte_t *pte;
+  uint64 pa;
+  
+  pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    panic("ukvmpa");
+  if((*pte & PTE_V) == 0)
+    panic("ukvmpa");
   pa = PTE2PA(*pte);
   return pa+off;
 }
@@ -271,6 +329,20 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
   }
 
   return newsz;
+}
+
+// Recursively free the pages occupied by a page table.
+void free_pagetable(pagetable_t pagetable) {
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      free_pagetable((pagetable_t)child);
+    }
+  }
+  kfree(pagetable);
 }
 
 // Recursively free page-table pages.

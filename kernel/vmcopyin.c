@@ -30,7 +30,10 @@ int
 copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
   struct proc *p = myproc();
-
+  // Explain why the third test srcva + len < srcva is necessary in
+  // copyin_new(): give values for srcva and len for which the first two test
+  // fail (i.e., they will not cause to return -1) but for which the third one
+  // is true (resulting in returning -1).
   if (srcva >= p->sz || srcva+len >= p->sz || srcva+len < srcva)
     return -1;
   memmove((void *) dst, (void *)srcva, len);
