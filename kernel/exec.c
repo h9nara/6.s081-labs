@@ -51,6 +51,10 @@ exec(char *path, char **argv)
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
+    // Doesn't allow memory to grow over PLIC.
+    if (sz1 >= PLIC) {
+      goto bad;
+    }
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
@@ -107,6 +111,11 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
+
+  // Free the old user mappings in the process's kernel page table.
+  uvmunmap(p -> kernel_pagetable, 0, PGROUNDUP(oldsz)/PGSIZE, 0);
+  // Copy the new user mappings to the process's kernel page table.
+  kvmcopymappings(pagetable, p -> kernel_pagetable, 0, sz);
     
   // Commit to the user image.
   oldpagetable = p->pagetable;

@@ -245,6 +245,7 @@ userinit(void)
   // allocate one user page and copy init's instructions
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
+  kvmcopymappings(p -> pagetable, p -> kernel_pagetable, 0, PGSIZE);
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -269,11 +270,18 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    uint64 new_sz;
+    if((new_sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
     }
+    if (kvmcopymappings(p -> pagetable, p -> kernel_pagetable, sz, n) != 0) {
+      uvmdealloc(p -> pagetable, new_sz, sz);
+      return -1;
+    }
+    sz = new_sz;
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    uvmdealloc(p->pagetable, sz, sz + n);
+    sz = kvmdealloc(p -> kernel_pagetable, sz, sz + n);
   }
   p->sz = sz;
   return 0;
@@ -293,12 +301,15 @@ fork(void)
     return -1;
   }
 
-  // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  // Copy user memory from parent to child. Then copy child's user mappings to
+  // its kernel page table.
+  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0 ||
+     kvmcopymappings(np -> pagetable, np -> kernel_pagetable, 0, p -> sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+
   np->sz = p->sz;
 
   np->parent = p;
