@@ -33,6 +33,7 @@ trapinithart(void)
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
 //
+// TODO: save registers to a new field in proc
 void
 usertrap(void)
 {
@@ -77,8 +78,20 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) {
+    if (p -> alarm_interval != 0) {
+      ++(p -> ticks);
+      // enough ticks, call handler
+      if (p -> ticks == p -> alarm_interval && !(p -> in_handler)) {
+        *(p -> alarm_trapframe) = *(p -> trapframe);
+        p -> trapframe -> epc = (uint64)(p -> handler);
+        p -> ticks = 0;
+        // turn on the in_handler flag.
+        p -> in_handler = 1;
+      }
+    }
     yield();
+  }
 
   usertrapret();
 }

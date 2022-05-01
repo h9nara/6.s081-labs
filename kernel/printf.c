@@ -121,6 +121,7 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+  backtrace();
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -131,4 +132,17 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+// a list of the function calls on the stack above the point at which the error
+// occurred.
+void backtrace(void) {
+  printf("backtrace:\n");
+  uint64 cur_fp = r_fp();
+  // bottom of the stack.
+  uint64 bot = PGROUNDUP(cur_fp);
+  while (cur_fp < bot) {
+    printf("%p\n", *(uint64*)(cur_fp - 8));
+    cur_fp = *((uint64*)(cur_fp - 16));
+  }
 }
