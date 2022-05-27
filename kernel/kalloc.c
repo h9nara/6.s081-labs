@@ -9,6 +9,11 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define PGREF_IDX(pa) (((pa) - KERNBASE)/PGSIZE)
+#define MAX_PGREF_ENTRIES PGREF_IDX(PHYSTOP)
+
+int pgref[MAX_PGREF_ENTRIES];
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -51,15 +56,18 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(pa, 1, PGSIZE);
+  if (--pgref[PGREF_IDX((uint64)pa)] <= 0) {
+    // Free the page.
+    // Fill with junk to catch dangling refs.
+    memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+    r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+    acquire(&kmem.lock);
+    r->next = kmem.freelist;
+    kmem.freelist = r;
+    release(&kmem.lock);
+  }
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -76,7 +84,28 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r) {
     memset((char*)r, 5, PGSIZE); // fill with junk
+    pgref[PGREF_IDX((uint64)r)] = 1;
+  }
   return (void*)r;
+}
+
+
+void incpgref(uint64 pa) {
+  ++pgref[PGREF_IDX(pa)];
+}
+
+uint64 copynderef(uint64 pa) {
+  // If reference count is 1, no need to copy.
+  if (pgref[PGREF_IDX(pa)] <= 1) {
+    return pa;
+  }
+  uint64 mem = (uint64)kalloc();
+  if (mem == 0) {
+    return 0;
+  }
+  memmove((void *)mem, (void *)pa, PGSIZE);
+  --pgref[PGREF_IDX(pa)];
+  return mem;
 }
