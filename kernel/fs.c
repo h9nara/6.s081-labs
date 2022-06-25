@@ -24,7 +24,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
 
 // Read the super block.
 static void
@@ -180,7 +180,7 @@ void
 iinit()
 {
   int i = 0;
-  
+
   initlock(&icache.lock, "icache");
   for(i = 0; i < NINODE; i++) {
     initsleeplock(&icache.inode[i].lock, "inode");
@@ -365,30 +365,21 @@ iunlockput(struct inode *ip)
   iput(ip);
 }
 
-// Inode content
-//
-// The content (data) associated with each inode is stored
-// in blocks on the disk. The first NDIRECT block numbers
-// are listed in ip->addrs[].  The next NINDIRECT blocks are
-// listed in block ip->addrs[NDIRECT].
-
-// Return the disk block address of the nth block in inode ip.
-// If there is no such block, bmap allocates one.
-static uint
-bmap(struct inode *ip, uint bn)
+static uint bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
-
-  if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
+  if (bn < NDIRECT)
+  {
+    if ((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
   bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
+  if (bn < NINDIRECT)
+  {
+    // Load singly indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
     bp = bread(ip->dev, addr);
@@ -400,9 +391,82 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  bn -= NINDIRECT;
 
-  panic("bmap: out of range");
+  struct buf *root_bp;
+  struct buf *leaf_bp;
+  if (bn < (NINDIRECT * NINDIRECT))
+  {
+    // Load root doubly-indirect block, allocating if necessary.
+    if ((addr = ip->addrs[DBINDIR]) == 0)
+      ip->addrs[DBINDIR] = addr = balloc(ip->dev);
+    root_bp = bread(ip->dev, addr);
+    uint root_ind = bn / NINDIRECT;
+    a = (uint *)root_bp->data;
+    // Load leaf doubly-indirect block, allocating if necessary.
+    if ((addr = a[root_ind]) == 0)
+    {
+      a[root_ind] = addr = balloc(ip->dev);
+      log_write(root_bp);
+    }
+    brelse(root_bp);
+    leaf_bp = bread(ip->dev, addr);
+    uint offset = bn % NINDIRECT;
+    a = (uint *)leaf_bp->data;
+    if ((addr = a[offset]) == 0)
+    {
+      a[offset] = addr = balloc(ip->dev);
+      log_write(leaf_bp);
+    }
+    brelse(leaf_bp);
+    return addr;
+  }
+
+  panic("mybmap: out of range");
 }
+
+// // Inode content
+// //
+// // The content (data) associated with each inode is stored
+// // in blocks on the disk. The first NDIRECT block numbers
+// // are listed in ip->addrs[].  The next NINDIRECT blocks are
+// // listed in block ip->addrs[NDIRECT].
+
+// // Return the disk block address of the nth block in inode ip.
+// // If there is no such block, bmap allocates one.
+// //
+// // Parameter bn is "logical block number", ip->addrs[] are disk block numbers.
+// // bmap can be viewed as mapping a file's logical block numbers into disk block
+// // numbers.
+// static uint
+// bmap(struct inode *ip, uint bn)
+// {
+//   uint addr, *a;
+//   struct buf *bp;
+
+//   if(bn < NDIRECT){
+//     if((addr = ip->addrs[bn]) == 0)
+//       ip->addrs[bn] = addr = balloc(ip->dev);
+//     return addr;
+//   }
+//   bn -= NDIRECT;
+
+//   if(bn < NINDIRECT){
+//     // Load indirect block, allocating if necessary.
+//     if((addr = ip->addrs[NDIRECT]) == 0)
+//       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+//     bp = bread(ip->dev, addr);
+//     a = (uint*)bp->data;
+//     if((addr = a[bn]) == 0){
+//       a[bn] = addr = balloc(ip->dev);
+//       log_write(bp);
+//     }
+//     brelse(bp);
+//     return addr;
+//   }
+
+//   panic("bmap: out of range");
+// }
 
 // Truncate inode (discard contents).
 // Caller must hold ip->lock.
@@ -430,6 +494,33 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  struct buf *root_bp, *leaf_bp;
+  if (ip->addrs[DBINDIR])
+  {
+    root_bp = bread(ip->dev, ip->addrs[DBINDIR]);
+    a = (uint *)root_bp->data;
+    for (i = 0; i < NINDIRECT; i++)
+    {
+      if (a[i])
+      {
+        leaf_bp = bread(ip->dev, a[i]);
+        uint *b = (uint *)leaf_bp->data;
+        for (j = 0; j < NINDIRECT; j++)
+        {
+          if (b[j])
+          {
+            bfree(ip->dev, b[j]);
+          }
+        }
+        brelse(leaf_bp);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(root_bp);
+    bfree(ip->dev, ip->addrs[DBINDIR]);
+    ip->addrs[DBINDIR] = 0;
   }
 
   ip->size = 0;
