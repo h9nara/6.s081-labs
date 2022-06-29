@@ -68,6 +68,7 @@ balloc(uint dev)
   struct buf *bp;
 
   bp = 0;
+  // Consider every block, from block 0 up to sb.size.
   for(b = 0; b < sb.size; b += BPB){
     bp = bread(dev, BBLOCK(b, sb));
     for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
